@@ -1,0 +1,3 @@
+-r booking_service/requirements.txt
+pytest
+httpx

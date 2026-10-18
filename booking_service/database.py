@@ -23,3 +23,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # 4. Створення базового класу для моделей
 #    Всі наші класи-таблиці (models) будуть наслідувати його
 Base = declarative_base()
+
+
+# 5. Залежність FastAPI: одна сесія БД на запит
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

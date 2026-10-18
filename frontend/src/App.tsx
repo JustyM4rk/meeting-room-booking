@@ -11,6 +11,30 @@ import axios from 'axios';
 // Вказуємо Axios завжди використовувати посилання з Vercel, або локальне, якщо ми розробляємо вдома
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
+// Додаємо JWT до кожного запиту
+axios.interceptors.request.use((config) => {
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    const { access_token } = JSON.parse(userStr);
+    if (access_token) {
+      config.headers.Authorization = `Bearer ${access_token}`;
+    }
+  }
+  return config;
+});
+
+// Якщо токен прострочений або недійсний (401) — повертаємо на логін
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Компонент захисту маршрутів
 const ProtectedRoute = ({ children, roleRequired }: { children: React.ReactNode, roleRequired?: string }) => {
   const userStr = localStorage.getItem('user');

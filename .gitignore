@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets and local config
+.env
+*.env.local
+
+# Tests
+.pytest_cache/
+test.db
+
+# Node
+node_modules/

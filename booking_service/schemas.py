@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field  # <--- ДОДАНО Field
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID  # Імпорт для роботи з UUID
 
 # --- USER ---
@@ -10,7 +10,8 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     name: str
-    password: str
+    # bcrypt only uses the first 72 bytes, so cap the length
+    password: str = Field(..., min_length=8, max_length=72)
     department: Optional[str] = None
 
 class User(UserBase):
@@ -63,7 +64,7 @@ class BookingUpdate(BaseModel):
     end_time: Optional[datetime] = None
     services: Optional[str] = None
     comment: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal["pending", "confirmed", "rejected"]] = None
 
 class Booking(BookingBase):
     id: UUID       # <--- ВАЖЛИВО: UUID
