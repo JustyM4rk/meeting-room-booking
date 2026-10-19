@@ -138,7 +138,8 @@ Create a free API key in [Google AI Studio](https://aistudio.google.com) and set
 ```bash
 export GEMINI_API_KEY=your-key
 # optional
-export GEMINI_MODEL=gemini-2.5-flash-lite        # any model your key can use
+export GEMINI_MODEL=gemini-3.5-flash-lite        # any model your key can use
+export GEMINI_THINKING_LEVEL=low                  # optional: faster answers on Gemini 3 models
 export ASSISTANT_RATE_LIMIT_PER_HOUR=30           # per user
 ```
 

@@ -41,7 +41,7 @@ class FakeLLM:
         self.repeat_last = repeat_last
         self.payloads = []
 
-    def __call__(self, payload):
+    def __call__(self, payload, timeout=None):
         self.payloads.append(copy.deepcopy(payload))
         if len(self.responses) > 1 or (self.responses and not self.repeat_last):
             return self.responses.pop(0)
@@ -112,7 +112,7 @@ def test_rate_limit_per_user(client, alice_h, bob_h, monkeypatch):
 
 
 def test_upstream_failure_does_not_leak_details(client, alice_h, monkeypatch):
-    def broken(payload):
+    def broken(payload, timeout=None):
         raise assistant.AssistantError("secret internal detail")
 
     monkeypatch.setattr(assistant, "call_llm", broken)
@@ -304,3 +304,84 @@ def test_call_llm_error_handling(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY")
     with pytest.raises(assistant.AssistantNotConfigured):
         assistant.call_llm({})
+
+
+# ------------------------------------------------- timeouts, retries, config
+def test_timeout_is_reported_as_504(client, alice_h, monkeypatch):
+    def slow(payload, timeout=None):
+        raise assistant.AssistantTimeout("upstream timeout", retryable=False)
+
+    monkeypatch.setattr(assistant, "call_llm", slow)
+    res = ask(client, alice_h)
+    assert res.status_code == 504
+    assert "upstream" not in res.text
+
+
+def test_transient_error_is_retried_once(client, alice_h, monkeypatch):
+    monkeypatch.setattr(assistant.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def flaky(payload, timeout=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise assistant.AssistantError("overloaded", retryable=True)
+        return text_reply("Вже працює")
+
+    monkeypatch.setattr(assistant, "call_llm", flaky)
+    res = ask(client, alice_h)
+    assert res.status_code == 200 and res.json()["reply"] == "Вже працює"
+    assert len(calls) == 2
+
+
+def test_permanent_error_is_not_retried(client, alice_h, monkeypatch):
+    calls = []
+
+    def broken(payload, timeout=None):
+        calls.append(1)
+        raise assistant.AssistantError("bad request", retryable=False)
+
+    monkeypatch.setattr(assistant, "call_llm", broken)
+    assert ask(client, alice_h).status_code == 502
+    assert len(calls) == 1
+
+
+def test_exhausted_time_budget_returns_504_without_calling_the_model(client, alice_h, monkeypatch):
+    monkeypatch.setattr(assistant, "TOTAL_BUDGET_SECONDS", 0)
+    fake = FakeLLM(text_reply("never used"))
+    assert ask(client, alice_h, fake=fake, monkeypatch=monkeypatch).status_code == 504
+    assert fake.payloads == []
+
+
+def test_generation_config_keeps_default_temperature(client, alice_h, monkeypatch):
+    monkeypatch.delenv("GEMINI_THINKING_LEVEL", raising=False)
+    fake = FakeLLM(text_reply("ok"))
+    ask(client, alice_h, fake=fake, monkeypatch=monkeypatch)
+    config = fake.payloads[0]["generationConfig"]
+    assert "temperature" not in config and "thinkingConfig" not in config
+
+    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "low")
+    fake = FakeLLM(text_reply("ok"))
+    ask(client, alice_h, fake=fake, monkeypatch=monkeypatch)
+    assert fake.payloads[0]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+
+
+def test_call_llm_classifies_errors(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def timeout(*a, **k):
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(httpx, "post", timeout)
+    with pytest.raises(assistant.AssistantTimeout) as info:
+        assistant.call_llm({})
+    assert info.value.retryable is True
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Response(503, text="overloaded"))
+    with pytest.raises(assistant.AssistantError) as info:
+        assistant.call_llm({})
+    assert info.value.retryable is True
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Response(400, text="bad"))
+    with pytest.raises(assistant.AssistantError) as info:
+        assistant.call_llm({})
+    assert info.value.retryable is False

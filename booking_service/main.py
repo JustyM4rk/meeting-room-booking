@@ -277,5 +277,7 @@ def assistant_chat(
         raise HTTPException(status_code=429, detail="Забагато запитів до асистента. Спробуйте пізніше")
     except assistant.AssistantNotConfigured:
         raise HTTPException(status_code=503, detail="Асистент не налаштований")
+    except assistant.AssistantTimeout:
+        raise HTTPException(status_code=504, detail="Асистент відповідає занадто довго. Спробуйте ще раз")
     except assistant.AssistantError:
         raise HTTPException(status_code=502, detail="Асистент тимчасово недоступний")
