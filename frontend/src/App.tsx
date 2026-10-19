@@ -6,6 +6,7 @@ import Login from './components/Login';
 import MyBookings from './components/MyBookings';
 import Register from './components/Register'; 
 import Dashboard from './components/Dashboard'; // <--- ДОДАНО: Імпорт Дашборда
+import ChatAssistant from './components/ChatAssistant';
 import axios from 'axios';
 
 // Вказуємо Axios завжди використовувати посилання з Vercel, або локальне, якщо ми розробляємо вдома
@@ -126,6 +127,8 @@ function App() {
             </ProtectedRoute>
           } />
         </Routes>
+
+        {user && <ChatAssistant />}
       </div>
     </Router>
   );

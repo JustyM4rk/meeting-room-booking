@@ -19,6 +19,7 @@ Full-stack web service for booking meeting rooms, with an admin panel, an analyt
 - Edit and cancel your own bookings; filter them by room and by status (upcoming / ongoing / completed)
 - Expected office load for the selected weekday and hour, shown in the booking dialog (ML forecast)
 - Email notifications on booking creation and status change, plus reminders 1 hour and 10 minutes before the meeting
+- AI assistant (chat widget): ask in natural language, e.g. "a room for 6 people tomorrow at 15:00"; it checks availability, forecasts the load and prepares a booking draft that you confirm with one click
 
 **Access control (enforced on the server)**
 - Every endpoint except login and registration requires a valid JWT
@@ -39,7 +40,8 @@ Full-stack web service for booking meeting rooms, with an admin panel, an analyt
 | ML & analytics | scikit-learn (Random Forest), pandas |
 | Background jobs | FastAPI `BackgroundTasks`, APScheduler, SMTP |
 | Frontend | React, TypeScript, Vite, Tailwind CSS, Axios, React Router |
-| Deployment | Frontend on Vercel |
+| AI assistant | Google Gemini API (free tier), function calling over REST with httpx |
+| Deployment | Backend on Render, frontend on Vercel |
 
 ## Architecture
 
@@ -51,6 +53,7 @@ FastAPI ──► SQLAlchemy ──► PostgreSQL
    │
    ├─► ML module: Random Forest trained on booking history, saved with pickle
    ├─► Analytics: aggregations with pandas
+   ├─► AI assistant: Gemini function calling (read-only tools + booking draft)
    └─► Notifications: BackgroundTasks (SMTP) + APScheduler (reminders)
 ```
 
@@ -61,6 +64,7 @@ FastAPI ──► SQLAlchemy ──► PostgreSQL
 - **Authentication.** Login issues a short-lived JWT (`SECRET_KEY` from the environment). The user's role is read from the database on every request, so changing a role takes effect immediately; login errors are generic so the endpoint does not reveal which emails are registered.
 - **Non-blocking emails.** Sending over SMTP is slow, so emails go through `BackgroundTasks` and the API responds immediately. Reminders are scheduled jobs that are removed when a booking is rejected or deleted.
 - **Load forecast.** A Random Forest regressor takes weekday and hour as features and predicts the expected number of bookings. It was chosen over linear regression because load has sharp, non-linear peaks (specific hours and days of the week). The result is mapped to a status: free / medium / high load.
+- **Assistant with least privilege.** The model gets read-only tools (rooms, free slots, the caller's own bookings, load forecast) and `propose_booking`, which validates a booking and returns a draft. It never writes to the database: the user confirms the draft in the UI and the frontend calls the regular `POST /bookings/` with the user's own JWT. Tools run on behalf of the authenticated user, so the model cannot pass a `user_id`. Cost and abuse are bounded by a per-user rate limit, message length limits, capped history and a capped number of tool rounds.
 
 ## API overview
 
@@ -78,6 +82,7 @@ Interactive docs (Swagger UI) are available at `/docs` when the backend is runni
 | GET | `/analytics/dashboard` | Booking statistics | admin |
 | GET | `/ml/predict?day=&hour=` | Load forecast for a weekday (0–6) and hour (0–23) | authenticated |
 | POST | `/ml/train` | Retrain the model on current data | admin |
+| POST | `/assistant/chat` | Chat with the AI assistant; may return a booking draft | authenticated, rate-limited |
 
 ## Getting started
 
@@ -126,6 +131,19 @@ Open http://localhost:5173. The API URL defaults to `http://127.0.0.1:8000`; set
 
 Set `SENDER_EMAIL` and `SENDER_PASSWORD` (for Gmail, an app password) before starting the backend. Without them, emails are printed to the console instead of being sent.
 
+### 5. AI assistant (optional)
+
+Create a free API key in [Google AI Studio](https://aistudio.google.com) and set it before starting the backend:
+
+```bash
+export GEMINI_API_KEY=your-key
+# optional
+export GEMINI_MODEL=gemini-2.5-flash-lite        # any model your key can use
+export ASSISTANT_RATE_LIMIT_PER_HOUR=30           # per user
+```
+
+Without a key the rest of the application works as usual and `/assistant/chat` returns `503`. The assistant sends only room data and the caller's own bookings to the Gemini API (no emails or passwords). Free-tier requests may be used by Google to improve its products, so do not type personal data into the chat.
+
 ## Tests
 
 ```bash
@@ -133,13 +151,13 @@ pip install -r requirements-dev.txt
 SECRET_KEY=test pytest
 ```
 
-The tests run against a temporary SQLite database and cover authentication, role checks, booking ownership, the overlap check and status changes.
+The tests run against a temporary SQLite database and cover authentication, role checks, booking ownership, the overlap check, status changes and the AI assistant (with a mocked language model).
 
 ## Project structure
 
 ```
-booking_service/   FastAPI app: routes, auth, models, schemas, CRUD, ML, analytics, scheduler, email
-tests/             pytest suite (security and booking rules)
+booking_service/   FastAPI app: routes, auth, assistant, models, schemas, CRUD, ML, analytics, scheduler, email
+tests/             pytest suite (security, booking rules, assistant)
 frontend/          React + TypeScript SPA
 docker-compose.yml PostgreSQL (plus services reserved for future use)
 populate.py        Demo data seeding

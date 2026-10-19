@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field  # <--- ДОДАНО Field
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from uuid import UUID  # Імпорт для роботи з UUID
 
 # --- USER ---
@@ -74,3 +74,27 @@ class Booking(BookingBase):
     
     class Config:
         from_attributes = True
+
+
+# --- AI ASSISTANT ---
+class AssistantMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+class AssistantRequest(BaseModel):
+    messages: List[AssistantMessage] = Field(..., min_length=1, max_length=12)
+
+class AssistantProposal(BaseModel):
+    room_id: str
+    room_name: str
+    start_time: str
+    end_time: str
+    title: str
+    participants_count: int
+    services: str
+    comment: str
+    requires_approval: bool
+
+class AssistantResponse(BaseModel):
+    reply: str
+    proposal: Optional[AssistantProposal] = None

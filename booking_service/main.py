@@ -6,7 +6,7 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
 # --- Імпорти модулів ---
-import models, schemas, crud, analytics, ml_engine
+import models, schemas, crud, analytics, ml_engine, assistant
 from database import SessionLocal, engine, get_db
 from auth import create_access_token, get_current_user, require_admin
 from email_service import send_email
@@ -256,3 +256,26 @@ def predict_office_load(day: int, hour: int, current_user: models.User = Depends
         "predicted_bookings": predicted_count,
         "status": status
     }
+
+
+# --- AI-асистент ---
+@app.post("/assistant/chat", response_model=schemas.AssistantResponse)
+def assistant_chat(
+    request: schemas.AssistantRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    last = request.messages[-1]
+    if last.role != "user":
+        raise HTTPException(status_code=400, detail="Останнє повідомлення має бути від користувача")
+    if len(last.content) > assistant.MAX_USER_MESSAGE_CHARS:
+        raise HTTPException(status_code=400, detail="Повідомлення занадто довге")
+
+    try:
+        return assistant.chat(db, current_user, [m.model_dump() for m in request.messages])
+    except assistant.RateLimited:
+        raise HTTPException(status_code=429, detail="Забагато запитів до асистента. Спробуйте пізніше")
+    except assistant.AssistantNotConfigured:
+        raise HTTPException(status_code=503, detail="Асистент не налаштований")
+    except assistant.AssistantError:
+        raise HTTPException(status_code=502, detail="Асистент тимчасово недоступний")
